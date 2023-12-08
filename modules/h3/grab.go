@@ -87,7 +87,7 @@ func findH3Addrs(resp *http.Response) []string {
 	return res
 }
 
-func TryGrab(target *zgrab2.ScanTarget, flags Flags, urlStr string, res Results) interface{} {
+func TryGrab(target *zgrab2.ScanTarget, flags *Flags, urlStr string, res *Results) interface{} {
 	if flags.DisableH3 {
 		return res
 	}
@@ -129,7 +129,7 @@ func TryGrab(target *zgrab2.ScanTarget, flags Flags, urlStr string, res Results)
 		return res
 	}
 
-	h3Res := H3Results{Results: res, QLog: make(map[string]interface{}, len(addrs))}
+	h3Res := H3Results{Results: *res, QLog: make(map[string]interface{}, len(addrs))}
 	for _, a := range addrs {
 		h3Res.QLog[a] = QuicRequest(target, a, flags)
 	}
