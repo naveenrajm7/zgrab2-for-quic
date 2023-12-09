@@ -86,6 +86,13 @@ type Flags struct {
 	DisableH3      bool `long:"disable-h3" description:"Disable h3 completely"`
 }
 
+// Struct to store, DialedAddrs lists the addresses connected to by the HTTP client
+type AddrDomain struct {
+	IP      string
+	Targets []string
+	Host    string
+}
+
 // A Results object is returned by the HTTP module's Scanner.Scan()
 // implementation.
 type Results struct {
@@ -95,6 +102,10 @@ type Results struct {
 	// RedirectResponseChain is non-empty is the scanner follows a redirect.
 	// It contains all redirect response prior to the final response.
 	RedirectResponseChain []*http.Response `json:"redirect_response_chain,omitempty"`
+
+	//// H3 specific
+	// DialedAddrs lists the addresses connected to by the HTTP client
+	DialedAddrs []AddrDomain `json:"dialed_addrs,omitempty"`
 }
 
 // Module is an implementation of the zgrab2.Module interface.
@@ -616,22 +627,20 @@ func (scan *scan) Grab() *zgrab2.ScanError {
 // multiple TCP connections to hosts other than target.
 func (scanner *Scanner) Scan(t zgrab2.ScanTarget) (zgrab2.ScanStatus, interface{}, error) {
 	scan := scanner.newHTTPScan(&t, scanner.config.UseHTTPS)
-	defer scan.Cleanup()
 	err := scan.Grab()
-	if err != nil {
-		if scanner.config.RetryHTTPS && !scanner.config.UseHTTPS {
-			scan.Cleanup()
-			retry := scanner.newHTTPScan(&t, true)
-			defer retry.Cleanup()
-			retryError := retry.Grab()
-			if retryError != nil {
-				return err.Unpack(&scan.results)
-			}
-			return zgrab2.SCAN_SUCCESS, &retry.results, nil
-		}
-		return err.Unpack(&scan.results)
+	if err != nil && scanner.config.RetryHTTPS && !scanner.config.UseHTTPS {
+		scan.Cleanup()
+		scan = scanner.newHTTPScan(&t, true)
+		err = scan.Grab()
 	}
-	return zgrab2.SCAN_SUCCESS, &scan.results, nil
+	defer scan.Cleanup()
+
+	// Try HTTP/3 scan
+	res := TryGrab(&t, scanner.config, scan.url, &scan.results)
+	if err != nil {
+		return err.Unpack(res)
+	}
+	return zgrab2.SCAN_SUCCESS, res, nil
 }
 
 // RegisterModule is called by modules/http.go to register this module with the
@@ -639,7 +648,7 @@ func (scanner *Scanner) Scan(t zgrab2.ScanTarget) (zgrab2.ScanStatus, interface{
 func RegisterModule() {
 	var module Module
 
-	_, err := zgrab2.AddCommand("http", "HTTP Banner Grab", module.Description(), 80, &module)
+	_, err := zgrab2.AddCommand("h3", "HTTP/3 Banner Grab", module.Description(), 80, &module)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -11,20 +11,17 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
-	"github.com/lucas-clemente/quic-go/logging"
-	"github.com/lucas-clemente/quic-go/qlog"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
+	"github.com/quic-go/quic-go/logging"
+	"github.com/quic-go/quic-go/qlog"
 	"github.com/zmap/zgrab2"
-	"github.com/zmap/zgrab2/modules/http/blocklist"
-	"github.com/zmap/zgrab2/modules/http/defs"
 )
 
-var ErrTooManyRedirects = errors.New("Too many h3 redirects")
+var ErrTooManyH3Redirects = errors.New("Too many h3 redirects")
 var ErrRedirectWithCreds = errors.New("h3 redirect contains credentials")
 
 type KV struct {
@@ -124,7 +121,7 @@ type ourResponse struct {
 	Request    ourRequest
 }
 
-func readToHash(flags *defs.Flags, res *http.Response) (length int64, body string, hash []byte) {
+func readToHash(flags *Flags, res *http.Response) (length int64, body string, hash []byte) {
 	readLen := int64(flags.MaxSize) * 1024
 	if res.ContentLength >= 0 && res.ContentLength < readLen {
 		readLen = res.ContentLength
@@ -145,7 +142,7 @@ func readToHash(flags *defs.Flags, res *http.Response) (length int64, body strin
 	return length, body, hash
 }
 
-func (aw *ArrayWriter) AddResponse(kind string, resp *http.Response, flags *defs.Flags) {
+func (aw *ArrayWriter) AddResponse(kind string, resp *http.Response, flags *Flags) {
 	length, _, hash := readToHash(flags, resp)
 	resp.Body.Close()
 
@@ -161,8 +158,8 @@ type ourUDPAddr struct {
 	Addr string
 }
 
-func getDial(flags *defs.Flags, target *zgrab2.ScanTarget, aw *ArrayWriter) func(string, string, *tls.Config, *quic.Config) (quic.EarlySession, error) {
-	return func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlySession, error) {
+func getDial(flags *Flags, target *zgrab2.ScanTarget, aw *ArrayWriter) func(string, string, *tls.Config, *quic.Config) (quic.EarlyConnection, error) {
+	return func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
 		host, svc, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
@@ -198,17 +195,19 @@ func getDial(flags *defs.Flags, target *zgrab2.ScanTarget, aw *ArrayWriter) func
 		}
 		//no 0RTT
 		return quic.DialContextPublic(ctx, udpConn, &udpAddr, addr, tlsCfg, cfg, false, true, true)
+		// the above should be quic.Dial() or quic.DialEarly (for 0-RTT) [new version]
+		// quic.Dial()
 	}
 }
 
-func getCheckRedirect(flags *defs.Flags, aw *ArrayWriter) func(*http.Request, []*http.Request) error {
+func getCheckRedirect(flags *Flags, aw *ArrayWriter) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		aw.AddResponse("redirect", req.Response, flags)
 
 		// flags.MaxRedirects defaults to 0, i.e., no redirects at all.
 		// We mirror the behavior of the non-h3 http scanner.
 		if len(via) > flags.MaxRedirects {
-			return ErrTooManyRedirects
+			return ErrTooManyH3Redirects
 		}
 
 		if req.URL.User != nil {
@@ -232,16 +231,17 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *defs.Flags) inte
 		},
 	}
 
-	ecnMode := quic.DisableECN
-	switch strings.ToLower(flags.ECNModeH3) {
-	case "ect0":
-		ecnMode = quic.UseECT0
-	case "ect1":
-		ecnMode = quic.UseECT1
-	}
-	if ecnMode != quic.DisableECN && !flags.DisableECNCEH3 {
-		ecnMode |= quic.TryCE
-	}
+	// ECN related
+	// ecnMode := quic.DisableECN
+	// switch strings.ToLower(flags.ECNModeH3) {
+	// case "ect0":
+	// 	ecnMode = quic.UseECT0
+	// case "ect1":
+	// 	ecnMode = quic.UseECT1
+	// }
+	// if ecnMode != quic.DisableECN && !flags.DisableECNCEH3 {
+	// 	ecnMode |= quic.TryCE
+	// }
 
 	roundTripper := &http3.RoundTripper{
 		TLSClientConfig: &tls.Config{
@@ -251,7 +251,7 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *defs.Flags) inte
 		QuicConfig: &quic.Config{
 			Tracer:               logging.NewMultiplexedTracer(tracer1, tracer2),
 			HandshakeIdleTimeout: 5000 * time.Millisecond,
-			ECNMode:              ecnMode,
+			// ECNMode:              ecnMode,
 		},
 		Dial: getDial(flags, target, aw),
 	}
