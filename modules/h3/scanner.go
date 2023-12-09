@@ -643,7 +643,7 @@ func (scanner *Scanner) Scan(t zgrab2.ScanTarget) (zgrab2.ScanStatus, interface{
 	return zgrab2.SCAN_SUCCESS, res, nil
 }
 
-// RegisterModule is called by modules/http.go to register this module with the
+// RegisterModule is called by modules/h3.go to register this module with the
 // zgrab2 framework.
 func RegisterModule() {
 	var module Module
