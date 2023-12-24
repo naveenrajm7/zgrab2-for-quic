@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -21,7 +20,7 @@ import (
 	"github.com/zmap/zgrab2"
 )
 
-var ErrTooManyH3Redirects = errors.New("Too many h3 redirects")
+var ErrTooManyH3Redirects = errors.New("too many h3 redirects")
 var ErrRedirectWithCreds = errors.New("h3 redirect contains credentials")
 
 type KV struct {
@@ -153,53 +152,6 @@ func (aw *ArrayWriter) AddResponse(kind string, resp *http.Response, flags *Flag
 	aw.Add(kind, or)
 }
 
-type ourUDPAddr struct {
-	net.UDPAddr
-	Addr string
-}
-
-func getDial(flags *Flags, target *zgrab2.ScanTarget, aw *ArrayWriter) func(string, string, *tls.Config, *quic.Config) (quic.EarlyConnection, error) {
-	return func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
-		host, svc, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-
-		// Use fixed IP if available and request is for target domain
-		resolver := net.DefaultResolver
-		if target.IP != nil && host == target.Domain {
-			if r, err := zgrab2.NewFakeResolver(target.IP.String()); err != nil {
-				return nil, err
-			} else {
-				resolver = r
-			}
-		}
-
-		// See quic.dialAddrContext
-		// network is always "udp" for h3
-		ctx, _ := context.WithTimeout(context.Background(), flags.Timeout)
-		ips, err := blocklist.LookupIP(resolver, ctx, target.IPNetwork(), host)
-		if err != nil {
-			return nil, err
-		}
-		port, err := resolver.LookupPort(ctx, network, svc)
-		if err != nil {
-			return nil, err
-		}
-		udpAddr := net.UDPAddr{IP: ips[0], Port: port}
-		aw.Add("remote-addr", &ourUDPAddr{UDPAddr: udpAddr, Addr: addr})
-
-		udpConn, err := net.DialUDP(network, &net.UDPAddr{IP: net.IPv4zero, Port: 0}, &udpAddr)
-		if err != nil {
-			return nil, err
-		}
-		//no 0RTT
-		return quic.DialContextPublic(ctx, udpConn, &udpAddr, addr, tlsCfg, cfg, false, true, true)
-		// the above should be quic.Dial() or quic.DialEarly (for 0-RTT) [new version]
-		// quic.Dial()
-	}
-}
-
 func getCheckRedirect(flags *Flags, aw *ArrayWriter) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		aw.AddResponse("redirect", req.Response, flags)
@@ -218,30 +170,12 @@ func getCheckRedirect(flags *Flags, aw *ArrayWriter) func(*http.Request, []*http
 	}
 }
 
-func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *defs.Flags) interface{} {
+func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface{} {
 	aw := NewArrayWriter()
 
-	tracer1 := qlog.NewTracer(aw.ForConn)
-	tracer2 := &customTracer{
-		tprcv: func(tp *logging.TransportParameters, conn []byte) {
-			aw.AddTypeConn(tp, conn)
-		},
-		h3rcv: func(s logging.StreamID, i interface{}, conn []byte) {
-			aw.AddTypeConnStream(i, conn, s)
-		},
+	qTracer := func(ctx context.Context, p logging.Perspective, connID quic.ConnectionID) *logging.ConnectionTracer {
+		return qlog.NewConnectionTracer(aw.ForConn(p, connID.Bytes()), p, connID)
 	}
-
-	// ECN related
-	// ecnMode := quic.DisableECN
-	// switch strings.ToLower(flags.ECNModeH3) {
-	// case "ect0":
-	// 	ecnMode = quic.UseECT0
-	// case "ect1":
-	// 	ecnMode = quic.UseECT1
-	// }
-	// if ecnMode != quic.DisableECN && !flags.DisableECNCEH3 {
-	// 	ecnMode |= quic.TryCE
-	// }
 
 	roundTripper := &http3.RoundTripper{
 		TLSClientConfig: &tls.Config{
@@ -249,11 +183,11 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *defs.Flags) inte
 			KeyLogWriter:       KeyLogWriter{aw},
 		},
 		QuicConfig: &quic.Config{
-			Tracer:               logging.NewMultiplexedTracer(tracer1, tracer2),
+			Tracer:               qTracer,
 			HandshakeIdleTimeout: 5000 * time.Millisecond,
 			// ECNMode:              ecnMode,
 		},
-		Dial: getDial(flags, target, aw),
+		// Dial: getDial(flags, target, aw),
 	}
 	// keep this in case of panics
 	defer roundTripper.Close()
