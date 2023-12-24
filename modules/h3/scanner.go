@@ -145,7 +145,7 @@ func (module *Module) NewScanner() zgrab2.Scanner {
 
 // Description returns an overview of this module.
 func (module *Module) Description() string {
-	return "Send an HTTP request and read the response, optionally following redirects."
+	return "Send an HTTP request and read the response, optionally following redirects. If Alt-svc is present, then try HTTP/3 request."
 }
 
 // Validate performs any needed validation on the arguments
