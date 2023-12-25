@@ -320,6 +320,28 @@ func (scan *scan) dialContext(ctx context.Context, network string, addr string) 
 	if err != nil {
 		return nil, err
 	}
+
+	// Below code is to Add DialedAddress to our result.
+	// Get Hostname from the given address
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	// IP Address from the dialed connection
+	var ip string
+	// Get IP address from connection
+	switch addr := conn.RemoteAddr().(type) {
+	case *net.UDPAddr:
+		ip = addr.IP.String()
+	case *net.TCPAddr:
+		ip = addr.IP.String()
+	}
+	// target_ips is a list of IP addresses that the target host resolved to
+	// This should come from implementing MultiFakeResolver. (blocklist.LookupIP -> zgrab2.NewMultiFakeResolver )
+	// We SKIP this for now, and just use the IP address
+	target_ips := []string{ip}
+	// Append to DialedAddrs, The IP and Hostname
+	scan.results.DialedAddrs = append(scan.results.DialedAddrs, AddrDomain{IP: ip, Targets: target_ips, Host: host})
 	scan.connections = append(scan.connections, conn)
 	return conn, nil
 }
