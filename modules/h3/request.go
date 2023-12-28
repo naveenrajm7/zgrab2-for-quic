@@ -173,8 +173,22 @@ func getCheckRedirect(flags *Flags, aw *ArrayWriter) func(*http.Request, []*http
 func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface{} {
 	aw := NewArrayWriter()
 
+	// qlog
 	qTracer := func(ctx context.Context, p logging.Perspective, connID quic.ConnectionID) *logging.ConnectionTracer {
 		return qlog.NewConnectionTracer(aw.ForConn(p, connID.Bytes()), p, connID)
+	}
+
+	// TODO: Add custom tracer for
+	// version negotiation packet and connection close packet for easier processing
+	// tracer2 := &customtracer{}
+
+	// TODO: Take from module flags
+	// QUIC version : Pick version based on test,
+	// QUICv1 - 0x1 To test QUICv1
+	// QUICv2 - 0x6b3343cf To test QUICv2
+	// QUICvIN - 0x3 To elicit version negotiation
+	var quicVersion = []quic.VersionNumber{
+		0x1,
 	}
 
 	roundTripper := &http3.RoundTripper{
@@ -185,6 +199,7 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 		QuicConfig: &quic.Config{
 			Tracer:               qTracer,
 			HandshakeIdleTimeout: 5000 * time.Millisecond,
+			Versions:             quicVersion,
 			// ECNMode:              ecnMode,
 		},
 		// Dial: getDial(flags, target, aw),

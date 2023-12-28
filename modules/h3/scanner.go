@@ -82,9 +82,10 @@ type Flags struct {
 	// WithBodyLength enables adding the body_size field to the Response
 	WithBodyLength bool `long:"with-body-size" description:"Enable the body_size attribute, for how many bytes actually read"`
 
-	UseFirstAltSvc bool `long:"use-first-altsvc" description:"Check the redirect chain in addition to the final response for an Alt-Svc header"`
-	AlwaysTryH3    bool `long:"always-try-h3" description:"Attempt h3 grab on :443 even without an Alt-Svc header"`
-	DisableH3      bool `long:"disable-h3" description:"Disable h3 completely"`
+	UseFirstAltSvc bool   `long:"use-first-altsvc" description:"Check the redirect chain in addition to the final response for an Alt-Svc header"`
+	AlwaysTryH3    bool   `long:"always-try-h3" description:"Attempt h3 grab on :443 even without an Alt-Svc header"`
+	DisableH3      bool   `long:"disable-h3" description:"Disable h3 completely"`
+	QuicVersion    string `long:"quic-version" description:"QUIC version to use for h3"`
 }
 
 // Struct to store, DialedAddrs lists the addresses connected to by the HTTP client
