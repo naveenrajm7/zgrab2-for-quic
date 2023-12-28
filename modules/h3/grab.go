@@ -35,8 +35,9 @@ func (auth AltAuthority) RequestURL(base *url.URL) string {
 	return fmt.Sprintf("https://%s:%d%s", auth.host, auth.port, base.EscapedPath())
 }
 
+// quic-go only supports h3 (RFCv1), and grease_quic_bit is only defined for RFCv1 and above
 var SupportedProtos = map[string]bool{
-	"h3-27": true, "h3-29": true, "h3-32": true, "h3-34": true, "h3": true,
+	"h3": true,
 }
 
 func findH3Addrs(resp *http.Response) []string {
