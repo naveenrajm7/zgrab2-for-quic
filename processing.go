@@ -19,10 +19,11 @@ type Grab struct {
 
 // ScanTarget is the host that will be scanned
 type ScanTarget struct {
-	IP     net.IP
-	Domain string
-	Tag    string
-	Port   *uint
+	IP      net.IP
+	Domain  string
+	Tag     string
+	Port    *uint
+	network string
 }
 
 func (target ScanTarget) String() string {
@@ -53,6 +54,19 @@ func (target *ScanTarget) Host() string {
 	}
 	log.Fatalf("Bad target %s: no IP/Domain", target.String())
 	panic("unreachable")
+}
+
+func (target *ScanTarget) IPNetwork() string {
+	// Explicit network name takes precedence
+	if len(target.network) > 0 {
+		return target.network
+	}
+	if target.IP == nil {
+		return "ip"
+	} else if target.IP.To4() != nil {
+		return "ip4"
+	}
+	return "ip6"
 }
 
 // Open connects to the ScanTarget using the configured flags, and returns a net.Conn that uses the configured timeouts for Read/Write operations.

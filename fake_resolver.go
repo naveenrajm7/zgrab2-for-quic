@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/net/dns/dnsmessage"
 	"net"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 // Fake DNS Resolver, to force a DNS lookup to return a pinned address
@@ -22,7 +23,33 @@ func NewFakeResolver(ipstr string) (*net.Resolver, error) {
 		return nil, fmt.Errorf("Fake resolver can't use non-IP '%s'", ipstr)
 	}
 	fDNS := FakeDNSServer{
-		IP: ip,
+		IPs: []net.IP{ip},
+	}
+	return &net.Resolver{
+		PreferGo: true, // Needed to force the use of the Go internal resolver
+		Dial:     fDNS.DialContext,
+	}, nil
+}
+
+// NewMultiFakeResolver creates a new Resolver that wraps a fake DNS server.
+// This resolver will always return a list of IPs that are represented by "ips",
+// for DNS queries of the same IP type. Otherwise, it will return a DNS lookup error.
+// This function is useful when you want to simulate DNS responses with multiple IPs.
+//
+// Parameters:
+// - ips: A slice of net.IP that the resolver should return for DNS queries.
+//
+// Returns:
+// - A pointer to the new net.Resolver that uses the fake DNS server.
+// - An error if any of the provided IPs is not a valid IPv4 or IPv6 address.
+func NewMultiFakeResolver(ips []net.IP) (*net.Resolver, error) {
+	for _, i := range ips {
+		if s := len(i); s != 4 && s != 16 {
+			return nil, fmt.Errorf("Fake resolver can't use non-IP '%s'", i.String())
+		}
+	}
+	fDNS := FakeDNSServer{
+		IPs: ips,
 	}
 	return &net.Resolver{
 		PreferGo: true, // Needed to force the use of the Go internal resolver
@@ -31,8 +58,8 @@ func NewFakeResolver(ipstr string) (*net.Resolver, error) {
 }
 
 type FakeDNSServer struct {
-	// Any domain name will resolve to this IP.  It can be either ipv4 or ipv6
-	IP net.IP
+	// Any domain name will resolve to these IPs. It can be a mix of ipv4 and ipv6
+	IPs []net.IP
 }
 
 // For a given DNS query, return the hard-coded IP that is part of
@@ -50,45 +77,38 @@ func (f *FakeDNSServer) fakeDNS(s string, dmsg dnsmessage.Message) (r dnsmessage
 		},
 		Questions: dmsg.Questions,
 	}
-	ipv6 := f.IP.To16()
-	ipv4 := f.IP.To4()
-	switch t := dmsg.Questions[0].Type; {
-	case t == dnsmessage.TypeA && ipv4 != nil:
-		var ip [4]byte
-		copy(ip[:], []byte(ipv4))
-		r.Answers = []dnsmessage.Resource{
-			{
+	for _, ip := range f.IPs {
+		ipv4 := ip.To4()
+		switch t := dmsg.Questions[0].Type; {
+		case t == dnsmessage.TypeA && ipv4 != nil:
+			body := dnsmessage.AResource{}
+			copy(body.A[:], ipv4)
+			r.Answers = append(r.Answers, dnsmessage.Resource{
 				Header: dnsmessage.ResourceHeader{
 					Name:   dmsg.Questions[0].Name,
 					Type:   dnsmessage.TypeA,
 					Class:  dnsmessage.ClassINET,
 					Length: 4,
 				},
-				Body: &dnsmessage.AResource{
-					A: ip,
-				},
-			},
-		}
-	case t == dnsmessage.TypeAAAA && ipv4 == nil:
-		var ip [16]byte
-		copy(ip[:], []byte(ipv6))
-		r.Answers = []dnsmessage.Resource{
-			{
+				Body: &body,
+			})
+		case t == dnsmessage.TypeAAAA && ipv4 == nil:
+			body := dnsmessage.AAAAResource{}
+			copy(body.AAAA[:], ip.To16())
+			r.Answers = append(r.Answers, dnsmessage.Resource{
 				Header: dnsmessage.ResourceHeader{
 					Name:   dmsg.Questions[0].Name,
 					Type:   dnsmessage.TypeAAAA,
 					Class:  dnsmessage.ClassINET,
 					Length: 16,
 				},
-				Body: &dnsmessage.AAAAResource{
-					AAAA: ip,
-				},
-			},
+				Body: &body,
+			})
 		}
-	default:
+	}
+	if len(r.Answers) == 0 {
 		r.Header.RCode = dnsmessage.RCodeNameError
 	}
-
 	return r, nil
 }
 

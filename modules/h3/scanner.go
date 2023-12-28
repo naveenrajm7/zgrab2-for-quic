@@ -26,6 +26,7 @@ import (
 	"github.com/zmap/zcrypto/tls"
 	"github.com/zmap/zgrab2"
 	"github.com/zmap/zgrab2/lib/http"
+	"github.com/zmap/zgrab2/modules/h3/blocklist"
 	"golang.org/x/net/html/charset"
 )
 
@@ -316,17 +317,32 @@ func (scan *scan) dialContext(ctx context.Context, network string, addr string) 
 
 	timeoutContext, _ := context.WithTimeout(context.Background(), scan.scanner.config.Timeout)
 
-	conn, err := dialer.DialContext(scan.withDeadlineContext(timeoutContext), network, addr)
-	if err != nil {
-		return nil, err
-	}
-
 	// Below code is to Add DialedAddress to our result.
 	// Get Hostname from the given address
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
+
+	// Get list of IP addresses that the host resolves to
+	targets, err := blocklist.LookupIP(dialer.Dialer.Resolver, scan.withDeadlineContext(timeoutContext), scan.target.IPNetwork(), host)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a MultiFakeResolver that will return the list of IP addresses
+	resolver, err := zgrab2.NewMultiFakeResolver(targets)
+	if err != nil {
+		return nil, err
+	}
+	// We are changing the default resolver to use our MultiFakeResolver
+	dialer.Dialer.Resolver = resolver
+
+	conn, err := dialer.DialContext(scan.withDeadlineContext(timeoutContext), network, addr)
+	if err != nil {
+		return nil, err
+	}
+
 	// IP Address from the dialed connection
 	var ip string
 	// Get IP address from connection
@@ -338,8 +354,10 @@ func (scan *scan) dialContext(ctx context.Context, network string, addr string) 
 	}
 	// target_ips is a list of IP addresses that the target host resolved to
 	// This should come from implementing MultiFakeResolver. (blocklist.LookupIP -> zgrab2.NewMultiFakeResolver )
-	// We SKIP this for now, and just use the IP address
-	target_ips := []string{ip}
+	var target_ips []string
+	for _, target := range targets {
+		target_ips = append(target_ips, target.String())
+	}
 	// Append to DialedAddrs, The IP and Hostname
 	scan.results.DialedAddrs = append(scan.results.DialedAddrs, AddrDomain{IP: ip, Targets: target_ips, Host: host})
 	scan.connections = append(scan.connections, conn)
