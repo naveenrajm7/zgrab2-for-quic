@@ -79,6 +79,11 @@ func (aw *ArrayWriter) AddTypeConn(i interface{}, connID []byte) {
 	aw.AddKV(&KV{Name: fmt.Sprintf("%T", i), Value: i, Conn: connID})
 }
 
+// To add version negotiation packet log
+func (aw *ArrayWriter) AddVersionPkt(i interface{}, connID []byte) {
+	aw.AddKV(&KV{Name: "Offered_Versions", Value: i, Conn: connID})
+}
+
 func (aw *ArrayWriter) AddTypeConnStream(i interface{}, connID []byte, stream logging.StreamID) {
 	aw.AddKV(&KV{Name: fmt.Sprintf("%T", i), Value: i, Conn: connID, Stream: &stream})
 }
@@ -234,12 +239,17 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 
 	// qlog
 	qTracer := func(ctx context.Context, p logging.Perspective, connID quic.ConnectionID) *logging.ConnectionTracer {
-		return qlog.NewConnectionTracer(aw.ForConn(p, connID.Bytes()), p, connID)
+		defaultTracer := qlog.NewConnectionTracer(aw.ForConn(p, connID.Bytes()), p, connID)
+		// Add seperate entry for required packets to json log for easier processing.
+		customTracer := &logging.ConnectionTracer{
+			// TODO: ADD connection closed packet by logging close reason.
+			// Add version negotiation packet by logging server offered versions.
+			ReceivedVersionNegotiationPacket: func(dest, src logging.ArbitraryLenConnectionID, offeredVersions []logging.VersionNumber) {
+				aw.AddVersionPkt(offeredVersions, dest)
+			},
+		}
+		return logging.NewMultiplexedConnectionTracer(defaultTracer, customTracer)
 	}
-
-	// TODO: Add custom tracer for
-	// version negotiation packet and connection close packet for easier processing
-	// tracer2 := &customtracer{}
 
 	// TODO: Take from module flags
 	// QUIC version : Pick version based on test,
