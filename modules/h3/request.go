@@ -164,6 +164,7 @@ type ourUDPAddr struct {
 	Addr string
 }
 
+// TODO: Fix "use of WriteTo with pre-connected connection" error
 // getDial returns our custom dial function for creating QUIC connections.
 // In this function we create a UDP connection and pass it to the QUIC transport.
 // Meanwhile, we filter the blocked address and log the remote address of the UDP connection.
@@ -272,7 +273,7 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 			DisableQUICBitGreasing: true, // false when testing greasing, true by default.
 			// ECNMode:              ecnMode,
 		},
-		Dial: getDial(flags, target, aw),
+		// Dial: getDial(flags, target, aw),
 	}
 	// keep this in case of panics
 	defer roundTripper.Close()
