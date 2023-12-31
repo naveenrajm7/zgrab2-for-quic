@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/quic-go/quic-go/logging"
 	"github.com/quic-go/quic-go/qlog"
 	"github.com/zmap/zgrab2"
+	"github.com/zmap/zgrab2/modules/h3/blocklist"
 )
 
 var ErrTooManyH3Redirects = errors.New("too many h3 redirects")
@@ -152,6 +154,63 @@ func (aw *ArrayWriter) AddResponse(kind string, resp *http.Response, flags *Flag
 	aw.Add(kind, or)
 }
 
+type ourUDPAddr struct {
+	net.UDPAddr
+	Addr string
+}
+
+// getDial returns our custom dial function for creating QUIC connections.
+// In this function we create a UDP connection and pass it to the QUIC transport.
+// Meanwhile, we filter the blocked address and log the remote address of the UDP connection.
+// This is usefull to get the remote IP address which is talking QUIC.
+func getDial(flags *Flags, target *zgrab2.ScanTarget, aw *ArrayWriter) func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+	return func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+		host, svc, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+
+		// Use fixed IP if available and request is for target domain
+		resolver := net.DefaultResolver
+		if target.IP != nil && host == target.Domain {
+			if r, err := zgrab2.NewFakeResolver(target.IP.String()); err != nil {
+				return nil, err
+			} else {
+				resolver = r
+			}
+		}
+
+		// See quic.dialAddrContext
+		// network is always "udp" for h3
+		network := "udp"
+		ips, err := blocklist.LookupIP(resolver, ctx, target.IPNetwork(), host)
+		if err != nil {
+			return nil, err
+		}
+		port, err := resolver.LookupPort(ctx, network, svc)
+		if err != nil {
+			return nil, err
+		}
+		udpAddr := net.UDPAddr{IP: ips[0], Port: port}
+		aw.Add("remote-addr", &ourUDPAddr{UDPAddr: udpAddr, Addr: addr})
+
+		udpConn, err := net.DialUDP(network, &net.UDPAddr{IP: net.IPv4zero, Port: 0}, &udpAddr)
+		if err != nil {
+			return nil, err
+		}
+
+		// Create QUIC transport with the UDP connection
+		tr := quic.Transport{
+			Conn: udpConn,
+		}
+
+		// Dials a new QUIC connection, attempting to use 0-RTT if possible
+		// (never possible, Since we dont know anything about QUIC server).
+		// This is used to satisfy the quic.Dialer interface.
+		return tr.DialEarly(ctx, &udpAddr, tlsCfg, cfg)
+	}
+}
+
 func getCheckRedirect(flags *Flags, aw *ArrayWriter) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		aw.AddResponse("redirect", req.Response, flags)
@@ -197,12 +256,13 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 			KeyLogWriter:       KeyLogWriter{aw},
 		},
 		QuicConfig: &quic.Config{
-			Tracer:               qTracer,
-			HandshakeIdleTimeout: 5000 * time.Millisecond,
-			Versions:             quicVersion,
+			Tracer:                 qTracer,
+			HandshakeIdleTimeout:   5000 * time.Millisecond,
+			Versions:               quicVersion,
+			DisableQUICBitGreasing: true, // false when testing greasing, true by default.
 			// ECNMode:              ecnMode,
 		},
-		// Dial: getDial(flags, target, aw),
+		Dial: getDial(flags, target, aw),
 	}
 	// keep this in case of panics
 	defer roundTripper.Close()
