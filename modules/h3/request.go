@@ -38,8 +38,13 @@ type ArrayWriterConn struct {
 	connID []byte
 }
 
+// Every time ArratWriterConn.Write is called
+// We see a new qlog entry with the \n as the value.
 func (awc *ArrayWriterConn) Write(p []byte) (n int, err error) {
-	awc.aw.AddKV(&KV{Name: "qlog", Value: string(p), Conn: awc.connID})
+	trimmedData := bytes.Trim(p, "\n")
+	if len(trimmedData) > 0 {
+		awc.aw.AddKV(&KV{Name: "qlog", Value: string(p), Conn: awc.connID})
+	}
 	return len(p), nil
 }
 
