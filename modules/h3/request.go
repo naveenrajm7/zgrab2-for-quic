@@ -80,8 +80,9 @@ func (aw *ArrayWriter) AddTypeConn(i interface{}, connID []byte) {
 }
 
 // To add version negotiation packet log
-func (aw *ArrayWriter) AddVersionPkt(i interface{}, connID []byte) {
-	aw.AddKV(&KV{Name: "Offered_Versions", Value: i, Conn: connID})
+// TODO: Log Hexadecimal string directly instead of converting to decimal and printing.
+func (aw *ArrayWriter) AddCustomKeyValue(key string, value interface{}, connID []byte) {
+	aw.AddKV(&KV{Name: key, Value: value, Conn: connID})
 }
 
 func (aw *ArrayWriter) AddTypeConnStream(i interface{}, connID []byte, stream logging.StreamID) {
@@ -165,6 +166,7 @@ type ourUDPAddr struct {
 }
 
 // TODO: Fix "use of WriteTo with pre-connected connection" error
+// As temp fix , Use "dst_ip" from transport:connection_started log to get remote IP address.
 // getDial returns our custom dial function for creating QUIC connections.
 // In this function we create a UDP connection and pass it to the QUIC transport.
 // Meanwhile, we filter the blocked address and log the remote address of the UDP connection.
@@ -243,10 +245,17 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 		defaultTracer := qlog.NewConnectionTracer(aw.ForConn(p, connID.Bytes()), p, connID)
 		// Add seperate entry for required packets to json log for easier processing.
 		customTracer := &logging.ConnectionTracer{
-			// TODO: ADD connection closed packet by logging close reason.
+			// Add connnection started packet by logging dst_ip (remote address, alternate for Dial).
+			StartedConnection: func(local, remote net.Addr, srcConnID, destConnID logging.ConnectionID) {
+				aw.AddCustomKeyValue("Remote_Address", remote, destConnID.Bytes())
+			},
 			// Add version negotiation packet by logging server offered versions.
 			ReceivedVersionNegotiationPacket: func(dest, src logging.ArbitraryLenConnectionID, offeredVersions []logging.VersionNumber) {
-				aw.AddVersionPkt(offeredVersions, dest)
+				aw.AddCustomKeyValue("Offered_Versions", offeredVersions, dest)
+			},
+			// ADD connection closed packet by logging close reason.
+			ClosedConnection: func(err error) {
+				aw.AddCustomKeyValue("Close_Reason", err, nil)
 			},
 		}
 		return logging.NewMultiplexedConnectionTracer(defaultTracer, customTracer)
@@ -270,7 +279,7 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 			Tracer:                 qTracer,
 			HandshakeIdleTimeout:   5000 * time.Millisecond,
 			Versions:               quicVersion,
-			DisableQUICBitGreasing: true, // false when testing greasing, true by default.
+			DisableQUICBitGreasing: false, // false when testing greasing, true by default.
 			// ECNMode:              ecnMode,
 		},
 		// Dial: getDial(flags, target, aw),
