@@ -293,7 +293,7 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 			Tracer:                 qTracer,
 			HandshakeIdleTimeout:   5000 * time.Millisecond,
 			Versions:               quicVersion,
-			DisableQUICBitGreasing: false, // false when testing greasing, true by default.
+			DisableQUICBitGreasing: true, // false when testing greasing, true by default.
 			// ECNMode:              ecnMode,
 		},
 		Dial: getDial(flags, target, aw),
