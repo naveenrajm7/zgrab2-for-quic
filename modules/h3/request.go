@@ -79,8 +79,9 @@ func (aw *ArrayWriter) AddTypeConn(i interface{}, connID []byte) {
 	aw.AddKV(&KV{Name: fmt.Sprintf("%T", i), Value: i, Conn: connID})
 }
 
-// To add version negotiation packet log
-// TODO: Log Hexadecimal string directly instead of converting to decimal and printing.
+// Our custom key value pair to log custom fields.
+// TODO: Log Hexadecimal string directly for versions
+// Currently decimal representation of version is logged.
 func (aw *ArrayWriter) AddCustomKeyValue(key string, value interface{}, connID []byte) {
 	aw.AddKV(&KV{Name: key, Value: value, Conn: connID})
 }
@@ -165,12 +166,12 @@ type ourUDPAddr struct {
 	Addr string
 }
 
-// TODO: Fix "use of WriteTo with pre-connected connection" error
-// As temp fix , Use "dst_ip" from transport:connection_started log to get remote IP address.
 // getDial returns our custom dial function for creating QUIC connections.
 // In this function we create a UDP connection and pass it to the QUIC transport.
-// Meanwhile, we filter the blocked address and log the remote address of the UDP connection.
+// Meanwhile, we filter the blocked address and log the first remote address of the UDP connection.
 // This is usefull to get the remote IP address which is talking QUIC.
+// Since we do not use UDPDial, it is not guranteed that the remote address is same as the first address we resolved
+// As a fix and confirmation , Use "dst_ip" from transport:connection_started qlog to get remote IP address.
 func getDial(flags *Flags, target *zgrab2.ScanTarget, aw *ArrayWriter) func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
 	return func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
 		host, svc, err := net.SplitHostPort(addr)
@@ -202,7 +203,15 @@ func getDial(flags *Flags, target *zgrab2.ScanTarget, aw *ArrayWriter) func(ctx 
 		udpAddr := net.UDPAddr{IP: ips[0], Port: port}
 		aw.Add("remote-addr", &ourUDPAddr{UDPAddr: udpAddr, Addr: addr})
 
-		udpConn, err := net.DialUDP(network, &net.UDPAddr{IP: net.IPv4zero, Port: 0}, &udpAddr)
+		// We do not use net.DialUDP, if used we need to handle WirteTo function in quic-go library.
+		// Error "use of WriteTo with pre-connected connection" will occur if Dial is used
+		// wihout handling preconnected connection.
+		// However, we use Dial function to filter IP address and log remote address.
+		// Also, logging remote address from qlog to get the remote IP address which is talking QUIC.
+		// udpConn, err := net.DialUDP(network, &net.UDPAddr{IP: net.IPv4zero, Port: 0}, &udpAddr)
+
+		// ListenUDP will just create a UDP socket and bind it to the given address to listent incoming packets.
+		udpConn, err := net.ListenUDP(network, &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +291,7 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 			DisableQUICBitGreasing: false, // false when testing greasing, true by default.
 			// ECNMode:              ecnMode,
 		},
-		// Dial: getDial(flags, target, aw),
+		Dial: getDial(flags, target, aw),
 	}
 	// keep this in case of panics
 	defer roundTripper.Close()
