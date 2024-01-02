@@ -157,7 +157,19 @@ func readToHash(flags *Flags, res *http.Response) (length int64, body string, ha
 
 func (aw *ArrayWriter) AddResponse(kind string, resp *http.Response, flags *Flags) {
 	length, _, hash := readToHash(flags, resp)
-	resp.Body.Close()
+	// Close the Body (IOStream). We are not using the body.
+	// Hence, we are not storing the http/3 response body.
+	// This saves output file size. We have similar option for http scan.
+	if !flags.SaveH3Body {
+		resp.Body.Close()
+	}
+	// Set the TLS field to nil, if you dont want to log TLS information of H3 response.
+	// It includes DidResume, NegotiatedProtocol, PeerCertificates etc.
+	// We will not store this in our result, since it contains invalid data types for our DB processing.
+	// TLS info might be useful to see 0-RTT connections, Enrypted SNI or Ecnrypted Client Hello.
+	if !flags.SaveH3TLS {
+		resp.TLS = nil
+	}
 
 	or := ourResponse{
 		Response: resp, BodySha256: hex.EncodeToString(hash),

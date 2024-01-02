@@ -82,10 +82,15 @@ type Flags struct {
 	// WithBodyLength enables adding the body_size field to the Response
 	WithBodyLength bool `long:"with-body-size" description:"Enable the body_size attribute, for how many bytes actually read"`
 
+	// H3 specific options
 	UseFirstAltSvc bool   `long:"use-first-altsvc" description:"Check the redirect chain in addition to the final response for an Alt-Svc header"`
-	AlwaysTryH3    bool   `long:"always-try-h3" description:"Attempt h3 grab on :443 even without an Alt-Svc header"`
-	DisableH3      bool   `long:"disable-h3" description:"Disable h3 completely"`
-	QuicVersion    string `long:"quic-version" description:"QUIC version to use for h3"`
+	AlwaysTryH3    bool   `long:"always-try-h3" description:"Attempt HTTP/3 grab on :443 even without an Alt-Svc header"`
+	DisableH3      bool   `long:"disable-h3" description:"Disable HTTP/3 completely"`
+	QuicVersion    string `long:"quic-version" description:"QUIC version to use for HTTP/3 connection"`
+	// Response save options
+	DoNotSaveBody bool `long:"do-not-save-body" description:"Do not save the body of the HTTP response in scan result"`
+	SaveH3Body    bool `long:"save-h3-body" description:"Save the body of the HTTP/3 response in scan result"`
+	SaveH3TLS     bool `long:"save-h3-tls" description:"Save the TLS handshake of the HTTP/3 response in scan result"`
 }
 
 // Struct to store, DialedAddrs lists the addresses connected to by the HTTP client
@@ -658,6 +663,12 @@ func (scan *scan) Grab() *zgrab2.ScanError {
 			m.Write(buf.Bytes())
 			scan.results.Response.BodySHA256 = m.Sum(nil)
 		}
+	}
+
+	// We will not save body of the response in scan result
+	// Helps save space in the output file.
+	if scan.scanner.config.DoNotSaveBody {
+		scan.results.Response.BodyText = "BODY_NOT_SAVED"
 	}
 
 	return nil
