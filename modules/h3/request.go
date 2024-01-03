@@ -268,8 +268,9 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 
 	// qlog
 	qTracer := func(ctx context.Context, p logging.Perspective, connID quic.ConnectionID) *logging.ConnectionTracer {
+		// default qlog tracer for connection
 		defaultTracer := qlog.NewConnectionTracer(aw.ForConn(p, connID.Bytes()), p, connID)
-		// Add seperate entry for required packets to json log for easier processing.
+		// custom logging: Add seperate entry for required packets to json log for easier processing.
 		customTracer := &logging.ConnectionTracer{
 			// Add connnection started packet by logging dst_ip (remote address, alternate for Dial).
 			StartedConnection: func(local, remote net.Addr, srcConnID, destConnID logging.ConnectionID) {
@@ -278,6 +279,10 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 			// Add version negotiation packet by logging server offered versions.
 			ReceivedVersionNegotiationPacket: func(dest, src logging.ArbitraryLenConnectionID, offeredVersions []logging.VersionNumber) {
 				aw.AddCustomKeyValue("Offered_Versions", offeredVersions, dest)
+			},
+			// Add server advertised transport parameters.
+			ReceivedTransportParameters: func(tp *logging.TransportParameters) {
+				aw.AddCustomKeyValue("Received_TP", tp, nil)
 			},
 			// ADD connection closed packet by logging close reason.
 			ClosedConnection: func(err error) {
