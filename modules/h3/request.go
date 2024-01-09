@@ -281,6 +281,10 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 				// TODO: Log Hexadecimal string directly for versions
 				aw.AddCustomKeyValue("Offered_Versions", offeredVersions, dest)
 			},
+			// Add client advertised transport parameters.
+			SentTransportParameters: func(tp *logging.TransportParameters) {
+				aw.AddCustomKeyValue("Sent_TP", tp, nil)
+			},
 			// Add server advertised transport parameters.
 			ReceivedTransportParameters: func(tp *logging.TransportParameters) {
 				aw.AddCustomKeyValue("Received_TP", tp, nil)
