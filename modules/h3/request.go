@@ -278,11 +278,16 @@ func QuicRequest(target *zgrab2.ScanTarget, addr string, flags *Flags) interface
 			},
 			// Add version negotiation packet by logging server offered versions.
 			ReceivedVersionNegotiationPacket: func(dest, src logging.ArbitraryLenConnectionID, offeredVersions []logging.VersionNumber) {
+				// TODO: Log Hexadecimal string directly for versions
 				aw.AddCustomKeyValue("Offered_Versions", offeredVersions, dest)
 			},
 			// Add server advertised transport parameters.
 			ReceivedTransportParameters: func(tp *logging.TransportParameters) {
 				aw.AddCustomKeyValue("Received_TP", tp, nil)
+			},
+			// Log Long Header QUIC bit, to check if server does greasing. (We do not log Short Header QUIC bit, due issue in processing)
+			ReceivedLongHeaderPacket: func(eh *logging.ExtendedHeader, bc logging.ByteCount, e logging.ECN, f []logging.Frame) {
+				aw.AddCustomKeyValue("Received_LH_QuicBit", eh.Header.QuicBit, nil)
 			},
 			// ADD connection closed packet by logging close reason.
 			ClosedConnection: func(err error) {
